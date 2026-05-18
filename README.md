@@ -1,0 +1,1 @@
+si no quieren utilizar el .exe deberan instalar Python 3.1 obligatoriamente e iniciar powershell o cmd en modo administrador .
