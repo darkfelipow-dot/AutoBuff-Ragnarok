@@ -22,11 +22,19 @@ def _is_admin() -> bool:
 
 def _relaunch_as_admin():
     """Relanza este mismo script con ShellExecute 'runas' (UAC prompt)."""
-    script = os.path.abspath(sys.argv[0])
-    params = " ".join(f'"{a}"' for a in sys.argv[1:])
-    ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, f'"{script}" {params}', None, 1
-    )
+    if getattr(sys, 'frozen', False):
+        # Si es un .exe compilado por PyInstaller
+        params = " ".join(f'"{a}"' for a in sys.argv[1:])
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, params, None, 1
+        )
+    else:
+        # Si se ejecuta como .py
+        script = os.path.abspath(sys.argv[0])
+        params = " ".join(f'"{a}"' for a in sys.argv[1:])
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, f'"{script}" {params}', None, 1
+        )
     sys.exit(0)
 
 if not _is_admin():
@@ -272,16 +280,33 @@ class SkillSpammerApp(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Skill Spammer Engine v1.0 released")
-        self.geometry("600x720")
+        self.title("Skill Spammer Engine v1.1 - Presets")
+        self.geometry("620x760")
         self.resizable(False, False)
         self.configure(bg=BG)
 
         self._clients      = []
         self._spam_active  = False
+        self.presets       = self._load_presets()
 
         self._build_ui()
         self._start_hwnd_watchdog()
+
+    def _load_presets(self):
+        import json
+        try:
+            with open("skill_spammer_presets.json", "r") as f:
+                return json.load(f)
+        except:
+            return {"Default": "F1"}
+
+    def _save_presets(self):
+        import json
+        try:
+            with open("skill_spammer_presets.json", "w") as f:
+                json.dump(self.presets, f, indent=4)
+        except Exception as e:
+            self._log_msg(f"Error guardando presets: {e}")
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -306,11 +331,29 @@ class SkillSpammerApp(tk.Tk):
         h.pack(fill="x", pady=(0, 8))
         tk.Label(h, text="⚡ Skill Spammer Background", bg=BG, fg=HIGHLIGHT,
                  font=("Segoe UI", 14, "bold")).pack(side="left")
-        tk.Label(h, text="Motor: 4RTools + AttachThreadInput", bg=BG, fg=GREY,
+        tk.Label(h, text="Github  Darkfelipow-dot", bg=BG, fg=GREY,
                  font=("Segoe UI", 8)).pack(side="right", pady=6)
 
+        # ── Presets ────────────────────────────────────────────────────────────
+        fp = ttk.LabelFrame(w, text="1. Presets de Secuencias", style="P.TLabelframe")
+        fp.pack(fill="x", pady=4)
+        
+        pr_f = tk.Frame(fp, bg=PANEL); pr_f.pack(fill="x", pady=2)
+        tk.Label(pr_f, text="Nombre:", bg=PANEL, fg=FG).pack(side="left", padx=2)
+        self._preset_name_var = tk.StringVar()
+        ttk.Entry(pr_f, textvariable=self._preset_name_var, width=14).pack(side="left", padx=2)
+        
+        tk.Label(pr_f, text="Teclas:", bg=PANEL, fg=FG).pack(side="left", padx=2)
+        self._preset_keys_var = tk.StringVar()
+        ttk.Entry(pr_f, textvariable=self._preset_keys_var, width=18).pack(side="left", padx=2)
+        
+        tk.Button(pr_f, text="💾 Guardar", command=self._save_preset,
+                  bg=ACCENT, fg=FG, activebackground=HIGHLIGHT, relief="flat", padx=6).pack(side="left", padx=4)
+        tk.Button(pr_f, text="❌ Borrar", command=self._delete_preset,
+                  bg=RED, fg="#fff", relief="flat", padx=4).pack(side="left", padx=2)
+
         # ── 1. Escanear ────────────────────────────────────────────────────────
-        f1 = ttk.LabelFrame(w, text="1. Clientes Ragnarok", style="P.TLabelframe")
+        f1 = ttk.LabelFrame(w, text="2. Clientes Ragnarok", style="P.TLabelframe")
         f1.pack(fill="x", pady=4)
 
         sr = tk.Frame(f1, bg=PANEL); sr.pack(fill="x")
@@ -322,7 +365,7 @@ class SkillSpammerApp(tk.Tk):
                   relief="flat", padx=8).pack(side="left")
 
         # tabla
-        self._canvas = tk.Canvas(f1, bg=PANEL, height=120, highlightthickness=0)
+        self._canvas = tk.Canvas(f1, bg=PANEL, height=140, highlightthickness=0)
         _sb = ttk.Scrollbar(f1, orient="vertical", command=self._canvas.yview)
         self._tbl = tk.Frame(self._canvas, bg=PANEL)
         self._tbl.bind("<Configure>",
@@ -333,12 +376,11 @@ class SkillSpammerApp(tk.Tk):
         _sb.pack(side="right", fill="y", pady=(4,0))
 
         hdr = tk.Frame(self._tbl, bg=PANEL); hdr.pack(fill="x")
-        for t,ww in [("✓",3),("HWND",9),("Ventana",20),("Secuencia",18),("Estado",8)]:
-            tk.Label(hdr, text=t, bg=PANEL, fg=GREY,
-                     font=("Segoe UI",8,"bold"), width=ww).pack(side="left", padx=2)
+        for t,ww in [("✓",2),("HWND",8),("Ventana",14),("Preset",12),("Teclas",12),("Estado",8)]:
+            tk.Label(hdr, text=t, bg=PANEL, fg=GREY, font=("Segoe UI",8,"bold"), width=ww).pack(side="left", padx=2)
 
         # ── 2. Config ──────────────────────────────────────────────────────────
-        f2 = ttk.LabelFrame(w, text="2. Configuración", style="P.TLabelframe")
+        f2 = ttk.LabelFrame(w, text="3. Configuración", style="P.TLabelframe")
         f2.pack(fill="x", pady=4)
 
         for r,(lbl,attr,val) in enumerate([
@@ -350,10 +392,8 @@ class SkillSpammerApp(tk.Tk):
             setattr(self, f"_{attr}_var", v)
             ttk.Entry(f2, textvariable=v, width=8).grid(row=r,column=1,sticky="w",padx=4)
 
-
-
         # ── 3. Disparador ──────────────────────────────────────────────────────
-        f3 = ttk.LabelFrame(w, text="3. Disparador (hotkey)", style="P.TLabelframe")
+        f3 = ttk.LabelFrame(w, text="4. Disparador (hotkey global)", style="P.TLabelframe")
         f3.pack(fill="x", pady=4)
 
         tk.Label(f3, text="Tecla:", bg=PANEL, fg=FG).grid(row=0,column=0,padx=8,pady=4,sticky="e")
@@ -372,29 +412,29 @@ class SkillSpammerApp(tk.Tk):
         self._status_var = tk.StringVar(value="⬛  Inactivo")
         self._status_lbl = tk.Label(w, textvariable=self._status_var,
                                     bg=BG, fg=GREY, font=("Segoe UI",11,"bold"))
-        self._status_lbl.pack(pady=6)
+        self._status_lbl.pack(pady=4)
 
         # ── Botones ───────────────────────────────────────────────────────────
         br = tk.Frame(w, bg=BG); br.pack(fill="x", pady=2)
-        self._btn_fire = tk.Button(br, text="▶ DISPARAR UNA VEZ",
+        self._btn_fire = tk.Button(br, text="▶ UNA VEZ",
                                    command=self._fire_once,
                                    bg=ACCENT, fg=FG, activebackground=HIGHLIGHT,
                                    font=("Segoe UI",10,"bold"), relief="flat",
-                                   padx=10, pady=8)
+                                   padx=6, pady=6)
         self._btn_fire.pack(side="left", padx=4, expand=True, fill="x")
 
         self._btn_loop = tk.Button(br, text="⏺ ACTIVAR LOOP",
                                    command=self._toggle_loop,
                                    bg=GREEN, fg="#fff", activebackground="#388e3c",
                                    font=("Segoe UI",10,"bold"), relief="flat",
-                                   padx=10, pady=8)
+                                   padx=6, pady=6)
         self._btn_loop.pack(side="left", padx=4, expand=True, fill="x")
 
         self._btn_diag = tk.Button(br, text="🔬 Diagnosticar",
                                    command=self._run_diagnostics,
                                    bg="#4a148c", fg=FG, activebackground="#6a1b9a",
                                    font=("Segoe UI",10,"bold"), relief="flat",
-                                   padx=10, pady=8)
+                                   padx=6, pady=6)
         self._btn_diag.pack(side="left", padx=4, expand=True, fill="x")
 
         self._stats_var = tk.StringVar(value="Enviados: 0 OK | 0 FAIL")
@@ -404,7 +444,7 @@ class SkillSpammerApp(tk.Tk):
         # ── Log ───────────────────────────────────────────────────────────────
         fl = ttk.LabelFrame(w, text="Log de Diagnóstico", style="P.TLabelframe")
         fl.pack(fill="both", expand=True, pady=4)
-        self._log = tk.Text(fl, bg=PANEL, fg=FG, height=8, insertbackground=FG,
+        self._log = tk.Text(fl, bg=PANEL, fg=FG, height=6, insertbackground=FG,
                             relief="flat", font=("Consolas",8), state="disabled")
         self._log.tag_configure("ok",   foreground="#4caf50")
         self._log.tag_configure("fail", foreground="#f44336")
@@ -418,6 +458,31 @@ class SkillSpammerApp(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    # ── Presets ───────────────────────────────────────────────────────────────
+    def _save_preset(self):
+        name = self._preset_name_var.get().strip()
+        keys = self._preset_keys_var.get().strip()
+        if name and keys:
+            self.presets[name] = keys
+            self._save_presets()
+            self._log_msg(f"✅ Preset '{name}' guardado ({keys}).")
+            self._update_all_comboboxes()
+
+    def _delete_preset(self):
+        name = self._preset_name_var.get().strip()
+        if name in self.presets:
+            del self.presets[name]
+            self._save_presets()
+            self._preset_name_var.set("")
+            self._preset_keys_var.set("")
+            self._log_msg(f"🗑 Preset '{name}' eliminado.")
+            self._update_all_comboboxes()
+            
+    def _update_all_comboboxes(self):
+        for c in self._clients:
+            if "cb_preset" in c:
+                c["cb_preset"]['values'] = list(self.presets.keys())
+
     # ── helpers ───────────────────────────────────────────────────────────────
     def _log_msg(self, msg, tag=""):
         self._log.configure(state="normal")
@@ -429,7 +494,6 @@ class SkillSpammerApp(tk.Tk):
             self._log.insert("end", full)
         self._log.see("end")
         self._log.configure(state="disabled")
-        # actualizar contador stats
         self.after(0, lambda: self._stats_var.set(
             f"Enviados: {_post_stats['ok']} OK | {_post_stats['fail']} FAIL"
         ))
@@ -457,9 +521,8 @@ class SkillSpammerApp(tk.Tk):
                 out.append((c["hwnd"], vks))
         return out
 
-    # ── HWND watchdog (auto-reconexión) ──────────────────────────────────────
+    # ── HWND watchdog ─────────────────────────────────────────────────────────
     def _start_hwnd_watchdog(self):
-        """Verifica cada 3 s si los HWND siguen válidos y actualiza indicadores."""
         def _watch():
             while True:
                 time.sleep(3)
@@ -472,20 +535,14 @@ class SkillSpammerApp(tk.Tk):
                         try:
                             self.after(0, lambda l=lbl, cl=color, tx=text:
                                        l.configure(fg=cl, text=tx))
-                        except Exception:
-                            pass
+                        except: pass
                     if not valid and self._clients:
-                        # Re-escanear silenciosamente si la ventana fue inválida
                         self.after(0, self._silent_rescan)
         threading.Thread(target=_watch, daemon=True).start()
 
     def _silent_rescan(self):
         title = self._title_var.get().strip()
         results = get_hwnds_by_title(title)
-        new_map = {buf.value if hasattr(buf,'value') else title: hwnd
-                   for hwnd, _, _ in results
-                   for _ in [None]}
-        # actualizar HWNDs existentes por título
         for c in self._clients:
             for hwnd, wt_title, _ in results:
                 if c["title"][:22] in wt_title or wt_title in c["title"]:
@@ -495,7 +552,6 @@ class SkillSpammerApp(tk.Tk):
 
     # ── escanear ─────────────────────────────────────────────────────────────
     def _scan(self):
-        # limpiar filas (excepto header)
         children = self._tbl.winfo_children()
         for ch in children[1:]:
             ch.destroy()
@@ -509,21 +565,33 @@ class SkillSpammerApp(tk.Tk):
         for hwnd, title, pid in results:
             var_chk = tk.BooleanVar(value=True)
             var_seq = tk.StringVar(value="F1")
+            
             rf = tk.Frame(self._tbl, bg=PANEL); rf.pack(fill="x")
             ttk.Checkbutton(rf, variable=var_chk).pack(side="left", padx=2)
-            tk.Label(rf, text=str(hwnd), bg=PANEL, fg=GREY,
-                     font=("Consolas",8), width=9).pack(side="left", padx=2)
-            tk.Label(rf, text=title[:20], bg=PANEL, fg=FG,
-                     font=("Segoe UI",8), width=20, anchor="w").pack(side="left",padx=2)
-            ttk.Entry(rf, textvariable=var_seq, width=18).pack(side="left", padx=2)
-            lbl_ok = tk.Label(rf, text="OK", fg=GREEN, bg=PANEL,
-                              font=("Segoe UI",8,"bold"), width=8)
+            tk.Label(rf, text=str(hwnd), bg=PANEL, fg=GREY, font=("Consolas",8), width=8).pack(side="left", padx=2)
+            tk.Label(rf, text=title[:16], bg=PANEL, fg=FG, font=("Segoe UI",8), width=16, anchor="w").pack(side="left",padx=2)
+            
+            cb_preset = ttk.Combobox(rf, values=list(self.presets.keys()), state="readonly", width=12)
+            cb_preset.pack(side="left", padx=2)
+            
+            ttk.Entry(rf, textvariable=var_seq, width=12).pack(side="left", padx=2)
+            
+            lbl_ok = tk.Label(rf, text="OK", fg=GREEN, bg=PANEL, font=("Segoe UI",8,"bold"), width=8)
             lbl_ok.pack(side="left", padx=2)
+            
+            def on_preset_select(e, v=var_seq, cb=cb_preset):
+                preset_name = cb.get()
+                if preset_name in self.presets:
+                    v.set(self.presets[preset_name])
+                    self._preset_name_var.set(preset_name)
+                    self._preset_keys_var.set(self.presets[preset_name])
+                    
+            cb_preset.bind("<<ComboboxSelected>>", on_preset_select)
 
             self._clients.append({
                 "hwnd": hwnd, "title": title,
                 "var_chk": var_chk, "var_seq": var_seq,
-                "lbl_status": lbl_ok,
+                "lbl_status": lbl_ok, "cb_preset": cb_preset
             })
             self._log_msg(f"✅ [{hwnd}] {title[:30]}")
 
