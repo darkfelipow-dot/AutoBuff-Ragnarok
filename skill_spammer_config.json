@@ -1,0 +1,8 @@
+{
+    "delay_ms": "11111",
+    "reps": "1",
+    "title": "Ragnarok",
+    "trigger_name": "BARRA ESPACIADORA",
+    "trigger_vk": 32,
+    "mode": "hold"
+}

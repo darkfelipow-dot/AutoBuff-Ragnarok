@@ -73,6 +73,10 @@ GetWindowThreadProcessId = user32.GetWindowThreadProcessId
 GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
 GetWindowThreadProcessId.restype = wt.DWORD
 
+GetKeyNameTextW = user32.GetKeyNameTextW
+GetKeyNameTextW.argtypes = [wt.LONG, wt.LPWSTR, ctypes.c_int]
+GetKeyNameTextW.restype = ctypes.c_int
+
 # ── Win32 ────────────────────────────────────────────────────────────────────
 WM_KEYDOWN = 0x0100
 WM_KEYUP   = 0x0101
@@ -101,6 +105,20 @@ TRIGGER_VK = {
     'NUMPAD0':0x60,'NUMPAD1':0x61,'NUMPAD2':0x62,
     'INSERT':0x2D,'HOME':0x24,'PAGEUP':0x21,
 }
+
+def get_key_name(vk: int) -> str:
+    for k, v in TRIGGER_VK.items():
+        if v == vk:
+            return k
+    scan_code = MapVirtualKeyW(vk, 0)
+    lparam = scan_code << 16
+    if vk in [0x21, 0x22, 0x23, 0x24, 0x2D, 0x2E, 0x25, 0x26, 0x27, 0x28]:
+        lparam |= (1 << 24)
+    buf = ctypes.create_unicode_buffer(128)
+    res = GetKeyNameTextW(lparam, buf, 128)
+    if res > 0:
+        return buf.value.upper()
+    return f"VK_{vk}"
 
 # ── Helpers Win32 ─────────────────────────────────────────────────────────────
 
@@ -287,10 +305,81 @@ class SkillSpammerApp(tk.Tk):
 
         self._clients      = []
         self._spam_active  = False
+        self._trigger_vk   = 0x14  # Default to CAPS LOCK
         self.presets       = self._load_presets()
 
         self._build_ui()
+        self._load_config()
         self._start_hwnd_watchdog()
+
+    def _load_config(self):
+        import json
+        try:
+            with open("skill_spammer_config.json", "r") as f:
+                config = json.load(f)
+                self._delay_ms_var.set(config.get("delay_ms", "100"))
+                self._reps_var.set(config.get("reps", "1"))
+                self._title_var.set(config.get("title", "Ragnarok"))
+                
+                name = config.get("trigger_name", "CAPS_LOCK")
+                vk = config.get("trigger_vk", 0x14)
+                self._trigger_vk = vk
+                self._trig_var.set(name)
+                
+                current_vals = list(self._trig_combobox['values'])
+                if name not in current_vals:
+                    current_vals.append(name)
+                    self._trig_combobox['values'] = current_vals
+                
+                self._mode_var.set(config.get("mode", "hold"))
+        except Exception as e:
+            # Fallback
+            self._trigger_vk = 0x14
+
+    def _save_config(self):
+        import json
+        config = {
+            "delay_ms": self._delay_ms_var.get(),
+            "reps": self._reps_var.get(),
+            "title": self._title_var.get(),
+            "trigger_name": self._trig_var.get(),
+            "trigger_vk": self._trigger_vk,
+            "mode": self._mode_var.get()
+        }
+        try:
+            with open("skill_spammer_config.json", "w") as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            self._log_msg(f"Error guardando config: {e}")
+
+    def _record_key(self):
+        self._btn_record.configure(text="⌨️ Presiona una tecla...", bg=HIGHLIGHT, fg="#fff")
+        self._log_msg("Esperando pulsación de tecla para disparador...")
+        self.focus_set()
+        self.bind("<KeyPress>", self._on_key_press_capture)
+
+    def _on_key_press_capture(self, event):
+        vk = event.keycode
+        self.unbind("<KeyPress>")
+        name = get_key_name(vk)
+        
+        current_vals = list(self._trig_combobox['values'])
+        if name not in current_vals:
+            current_vals.append(name)
+            self._trig_combobox['values'] = current_vals
+            
+        self._trigger_vk = vk
+        self._trig_var.set(name)
+        
+        self._btn_record.configure(text="🎯 Grabar Tecla", bg=ACCENT, fg=FG)
+        self._log_msg(f"✅ Disparador asignado: {name} (VK: {vk})", "ok")
+        self._save_config()
+
+    def _on_trig_combo_select(self, event):
+        name = self._trig_var.get()
+        if name in TRIGGER_VK:
+            self._trigger_vk = TRIGGER_VK[name]
+        self._save_config()
 
     def _load_presets(self):
         import json
@@ -397,16 +486,26 @@ class SkillSpammerApp(tk.Tk):
         f3.pack(fill="x", pady=4)
 
         tk.Label(f3, text="Tecla:", bg=PANEL, fg=FG).grid(row=0,column=0,padx=8,pady=4,sticky="e")
+        
+        ftrig = tk.Frame(f3, bg=PANEL)
+        ftrig.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+        
         self._trig_var = tk.StringVar(value="CAPS_LOCK")
-        ttk.Combobox(f3, textvariable=self._trig_var,
-                     values=list(TRIGGER_VK.keys()), state="readonly", width=14
-                     ).grid(row=0,column=1,padx=4,pady=4,sticky="w")
+        self._trig_combobox = ttk.Combobox(ftrig, textvariable=self._trig_var,
+                                           values=list(TRIGGER_VK.keys()), state="readonly", width=12)
+        self._trig_combobox.pack(side="left", padx=2)
+        self._trig_combobox.bind("<<ComboboxSelected>>", self._on_trig_combo_select)
+        
+        self._btn_record = tk.Button(ftrig, text="🎯 Grabar Tecla", command=self._record_key,
+                                     bg=ACCENT, fg=FG, activebackground=HIGHLIGHT,
+                                     relief="flat", font=("Segoe UI", 8, "bold"), padx=4)
+        self._btn_record.pack(side="left", padx=2)
 
         self._mode_var = tk.StringVar(value="hold")
         tk.Label(f3, text="Modo:", bg=PANEL, fg=FG).grid(row=0,column=2,padx=8)
         fm = tk.Frame(f3, bg=PANEL); fm.grid(row=0,column=3,padx=4)
         for t,v in [("Mantener","hold"),("Toggle","toggle")]:
-            ttk.Radiobutton(fm, text=t, variable=self._mode_var, value=v).pack(side="left",padx=4)
+            ttk.Radiobutton(fm, text=t, variable=self._mode_var, value=v, command=self._save_config).pack(side="left",padx=4)
 
         # ── Estado ────────────────────────────────────────────────────────────
         self._status_var = tk.StringVar(value="⬛  Inactivo")
@@ -675,7 +774,7 @@ class SkillSpammerApp(tk.Tk):
                                      bg=RED, activebackground="#c62828")
             self._log_msg("🟢 Loop activado.")
             delay, reps = self._get_cfg()
-            trigger_vk  = TRIGGER_VK.get(self._trig_var.get(), 0x14)
+            trigger_vk  = self._trigger_vk
             mode        = self._mode_var.get()
 
             def _monitor():
@@ -718,6 +817,7 @@ class SkillSpammerApp(tk.Tk):
 
     def _on_close(self):
         self._spam_active = False
+        self._save_config()
         self.destroy()
 
 
