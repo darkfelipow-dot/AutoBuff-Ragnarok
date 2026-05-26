@@ -318,6 +318,7 @@ class SkillSpammerApp(tk.Tk):
             with open("skill_spammer_config.json", "r") as f:
                 config = json.load(f)
                 self._delay_ms_var.set(config.get("delay_ms", "100"))
+                self._delay_esp_ms_var.set(config.get("delay_esp_ms", "300"))
                 self._reps_var.set(config.get("reps", "1"))
                 self._title_var.set(config.get("title", "Ragnarok"))
                 
@@ -340,6 +341,7 @@ class SkillSpammerApp(tk.Tk):
         import json
         config = {
             "delay_ms": self._delay_ms_var.get(),
+            "delay_esp_ms": self._delay_esp_ms_var.get(),
             "reps": self._reps_var.get(),
             "title": self._title_var.get(),
             "trigger_name": self._trig_var.get(),
@@ -465,7 +467,7 @@ class SkillSpammerApp(tk.Tk):
         _sb.pack(side="right", fill="y", pady=(4,0))
 
         hdr = tk.Frame(self._tbl, bg=PANEL); hdr.pack(fill="x")
-        for t,ww in [("✓",2),("HWND",8),("Ventana",14),("Preset",12),("Teclas",12),("Estado",8)]:
+        for t,ww in [("✓",2),("HWND",8),("Ventana",12),("✓ Esp.",5),("T.Esp.",6),("Preset",8),("Teclas",10),("Estado",6)]:
             tk.Label(hdr, text=t, bg=PANEL, fg=GREY, font=("Segoe UI",8,"bold"), width=ww).pack(side="left", padx=2)
 
         # ── 2. Config ──────────────────────────────────────────────────────────
@@ -474,6 +476,7 @@ class SkillSpammerApp(tk.Tk):
 
         for r,(lbl,attr,val) in enumerate([
             ("Delay entre teclas (ms):","delay_ms","100"),
+            ("Delay transición especial (ms):","delay_esp_ms","300"),
             ("Repeticiones por disparo:","reps","1"),
         ]):
             tk.Label(f2, text=lbl, bg=PANEL, fg=FG).grid(row=r,column=0,sticky="e",padx=8,pady=3)
@@ -606,18 +609,32 @@ class SkillSpammerApp(tk.Tk):
     def _get_cfg(self):
         try:    delay = max(10, int(self._delay_ms_var.get())) / 1000.0
         except: delay = 0.1
+        try:    delay_esp = max(0, int(self._delay_esp_ms_var.get())) / 1000.0
+        except: delay_esp = 0.3
         try:    reps = max(1, int(self._reps_var.get()))
         except: reps = 1
-        return delay, reps
+        return delay, delay_esp, reps
 
     def _collect_targets(self):
         out = []
         for c in self._clients:
             if not c["var_chk"].get(): continue
-            raw = [k.strip().upper() for k in c["var_seq"].get().split(",") if k.strip()]
-            vks = [VK_CODES[k] for k in raw if k in VK_CODES]
-            if vks:
-                out.append((c["hwnd"], vks))
+            
+            # Special Key (Habilidad 1)
+            esp_vk = None
+            if c["var_esp_chk"].get():
+                raw_esp = c["var_esp_key"].get().strip().upper()
+                esp_vk = VK_CODES.get(raw_esp)
+                
+            # Main sequence
+            raw_seq = [k.strip().upper() for k in c["var_seq"].get().split(",") if k.strip()]
+            vks = [VK_CODES[k] for k in raw_seq if k in VK_CODES]
+            
+            out.append({
+                "hwnd": c["hwnd"],
+                "esp_vk": esp_vk,
+                "vks": vks
+            })
         return out
 
     # ── HWND watchdog ─────────────────────────────────────────────────────────
@@ -664,18 +681,23 @@ class SkillSpammerApp(tk.Tk):
         for hwnd, title, pid in results:
             var_chk = tk.BooleanVar(value=True)
             var_seq = tk.StringVar(value="F1")
+            var_esp_chk = tk.BooleanVar(value=False)
+            var_esp_key = tk.StringVar(value="F9")
             
             rf = tk.Frame(self._tbl, bg=PANEL); rf.pack(fill="x")
             ttk.Checkbutton(rf, variable=var_chk).pack(side="left", padx=2)
             tk.Label(rf, text=str(hwnd), bg=PANEL, fg=GREY, font=("Consolas",8), width=8).pack(side="left", padx=2)
-            tk.Label(rf, text=title[:16], bg=PANEL, fg=FG, font=("Segoe UI",8), width=16, anchor="w").pack(side="left",padx=2)
+            tk.Label(rf, text=title[:12], bg=PANEL, fg=FG, font=("Segoe UI",8), width=12, anchor="w").pack(side="left",padx=2)
             
-            cb_preset = ttk.Combobox(rf, values=list(self.presets.keys()), state="readonly", width=12)
+            ttk.Checkbutton(rf, variable=var_esp_chk).pack(side="left", padx=2)
+            ttk.Entry(rf, textvariable=var_esp_key, width=6).pack(side="left", padx=2)
+            
+            cb_preset = ttk.Combobox(rf, values=list(self.presets.keys()), state="readonly", width=8)
             cb_preset.pack(side="left", padx=2)
             
-            ttk.Entry(rf, textvariable=var_seq, width=12).pack(side="left", padx=2)
+            ttk.Entry(rf, textvariable=var_seq, width=10).pack(side="left", padx=2)
             
-            lbl_ok = tk.Label(rf, text="OK", fg=GREEN, bg=PANEL, font=("Segoe UI",8,"bold"), width=8)
+            lbl_ok = tk.Label(rf, text="OK", fg=GREEN, bg=PANEL, font=("Segoe UI",8,"bold"), width=6)
             lbl_ok.pack(side="left", padx=2)
             
             def on_preset_select(e, v=var_seq, cb=cb_preset):
@@ -690,6 +712,7 @@ class SkillSpammerApp(tk.Tk):
             self._clients.append({
                 "hwnd": hwnd, "title": title,
                 "var_chk": var_chk, "var_seq": var_seq,
+                "var_esp_chk": var_esp_chk, "var_esp_key": var_esp_key,
                 "lbl_status": lbl_ok, "cb_preset": cb_preset
             })
             self._log_msg(f"✅ [{hwnd}] {title[:30]}")
@@ -728,10 +751,27 @@ class SkillSpammerApp(tk.Tk):
         if not targets:
             self._log_msg("⚠  Escanea y configura una secuencia primero.", "warn")
             return
-        delay, reps = self._get_cfg()
+        delay, delay_esp, reps = self._get_cfg()
         self._btn_fire.configure(state="disabled")
 
         def _run():
+            # Step 1: Send Special Key (Habilidad 1) in parallel
+            esp_threads = []
+            for target in targets:
+                hwnd = target["hwnd"]
+                esp_vk = target["esp_vk"]
+                if esp_vk is not None:
+                    t = threading.Thread(target=post_key, args=(hwnd, esp_vk), daemon=True)
+                    t.start()
+                    esp_threads.append(t)
+            
+            for t in esp_threads:
+                t.join()
+                
+            if esp_threads:
+                time.sleep(delay_esp)
+                
+            # Step 2: Send Main Sequence in parallel
             def _spam_one(hwnd, vks):
                 for _ in range(reps):
                     results = post_sequence(hwnd, vks, delay)
@@ -744,10 +784,13 @@ class SkillSpammerApp(tk.Tk):
                         self._log_msg(f"✅ [{hwnd}] Enviado OK", "ok")
 
             threads = []
-            for hwnd, vks in targets:
-                t = threading.Thread(target=_spam_one, args=(hwnd, vks), daemon=True)
-                t.start()
-                threads.append(t)
+            for target in targets:
+                hwnd = target["hwnd"]
+                vks = target["vks"]
+                if vks:
+                    t = threading.Thread(target=_spam_one, args=(hwnd, vks), daemon=True)
+                    t.start()
+                    threads.append(t)
             
             for t in threads:
                 t.join()
@@ -773,7 +816,7 @@ class SkillSpammerApp(tk.Tk):
             self._btn_loop.configure(text="⏹ DETENER LOOP",
                                      bg=RED, activebackground="#c62828")
             self._log_msg("🟢 Loop activado.")
-            delay, reps = self._get_cfg()
+            delay, delay_esp, reps = self._get_cfg()
             trigger_vk  = self._trigger_vk
             mode        = self._mode_var.get()
 
@@ -794,17 +837,37 @@ class SkillSpammerApp(tk.Tk):
                         self._set_status("🟢  SPAMEANDO", GREEN)
                         cur_targets = self._collect_targets()
                         
+                        # Step 1: Send Special Key (Habilidad 1) in parallel
+                        esp_threads = []
+                        for target in cur_targets:
+                            hwnd = target["hwnd"]
+                            esp_vk = target["esp_vk"]
+                            if esp_vk is not None:
+                                t = threading.Thread(target=post_key, args=(hwnd, esp_vk), daemon=True)
+                                t.start()
+                                esp_threads.append(t)
+                        
+                        for t in esp_threads:
+                            t.join()
+                            
+                        if esp_threads:
+                            time.sleep(delay_esp)
+                            
+                        # Step 2: Send Main Sequence in parallel (with reps)
                         def _spam_one(h, v):
                             for _ in range(reps):
                                 if not self._spam_active: break
                                 post_sequence(h, v, delay)
 
                         threads = []
-                        for hwnd, vks in cur_targets:
+                        for target in cur_targets:
                             if not self._spam_active: break
-                            t = threading.Thread(target=_spam_one, args=(hwnd, vks), daemon=True)
-                            t.start()
-                            threads.append(t)
+                            hwnd = target["hwnd"]
+                            vks = target["vks"]
+                            if vks:
+                                t = threading.Thread(target=_spam_one, args=(hwnd, vks), daemon=True)
+                                t.start()
+                                threads.append(t)
                         
                         for t in threads:
                             t.join()
