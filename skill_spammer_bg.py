@@ -77,6 +77,14 @@ GetKeyNameTextW = user32.GetKeyNameTextW
 GetKeyNameTextW.argtypes = [wt.LONG, wt.LPWSTR, ctypes.c_int]
 GetKeyNameTextW.restype = ctypes.c_int
 
+GetAncestor = user32.GetAncestor
+GetAncestor.argtypes = [wt.HWND, wt.UINT]
+GetAncestor.restype = wt.HWND
+
+SetWindowDisplayAffinity = user32.SetWindowDisplayAffinity
+SetWindowDisplayAffinity.argtypes = [wt.HWND, wt.DWORD]
+SetWindowDisplayAffinity.restype = wt.BOOL
+
 # ── Win32 ────────────────────────────────────────────────────────────────────
 WM_KEYDOWN = 0x0100
 WM_KEYUP   = 0x0101
@@ -95,7 +103,7 @@ VK_CODES = {
     'NUMPAD0':0x60,'NUMPAD1':0x61,'NUMPAD2':0x62,'NUMPAD3':0x63,
     'NUMPAD4':0x64,'NUMPAD5':0x65,'NUMPAD6':0x66,'NUMPAD7':0x67,
     'NUMPAD8':0x68,'NUMPAD9':0x69,
-    'TAB':0x09,'SPACE':0x20,'ESCAPE':0x1B,
+    'TAB':0x09,'SPACE':0x20,'ESCAPE':0x1B,'ENTER':0x0D,
 }
 TRIGGER_VK = {
     'CAPS_LOCK':0x14,'SCROLL_LOCK':0x91,'PAUSE':0x13,
@@ -307,6 +315,8 @@ class SkillSpammerApp(tk.Tk):
         self._spam_active  = False
         self._trigger_vk   = 0x14  # Default to CAPS LOCK
         self.presets       = self._load_presets()
+        self._streamer_mode_var = tk.BooleanVar(value=False)
+        self._streamer_type_var = tk.StringVar(value="Caja Negra (Discord/Full)")
 
         self._build_ui()
         self._load_config()
@@ -333,6 +343,14 @@ class SkillSpammerApp(tk.Tk):
                     self._trig_combobox['values'] = current_vals
                 
                 self._mode_var.set(config.get("mode", "hold"))
+                
+                # Cargar y aplicar modo streamer si estaba activo
+                streamer_mode = config.get("streamer_mode", False)
+                streamer_type = config.get("streamer_type", "Caja Negra (Discord/Full)")
+                self._streamer_mode_var.set(streamer_mode)
+                self._streamer_type_var.set(streamer_type)
+                if streamer_mode:
+                    self.after(150, self._toggle_streamer_mode)
         except Exception as e:
             # Fallback
             self._trigger_vk = 0x14
@@ -346,7 +364,9 @@ class SkillSpammerApp(tk.Tk):
             "title": self._title_var.get(),
             "trigger_name": self._trig_var.get(),
             "trigger_vk": self._trigger_vk,
-            "mode": self._mode_var.get()
+            "mode": self._mode_var.get(),
+            "streamer_mode": self._streamer_mode_var.get(),
+            "streamer_type": self._streamer_type_var.get()
         }
         try:
             with open("skill_spammer_config.json", "w") as f:
@@ -382,6 +402,44 @@ class SkillSpammerApp(tk.Tk):
         if name in TRIGGER_VK:
             self._trigger_vk = TRIGGER_VK[name]
         self._save_config()
+
+    def _toggle_streamer_mode(self):
+        try:
+            hwnd = self.winfo_id()
+            hwnd_root = GetAncestor(hwnd, 2) # GA_ROOT = 2
+            
+            if self._streamer_mode_var.get():
+                mode_str = self._streamer_type_var.get()
+                if "Invisible" in mode_str:
+                    affinity = 0x00000011  # WDA_EXCLUDEFROMCAPTURE (Invisible)
+                else:
+                    affinity = 0x00000001  # WDA_MONITOR (Caja Negra)
+                
+                # Disfrazar el título de la ventana
+                self.title("Internet Explorer")
+            else:
+                affinity = 0x00000000  # WDA_NONE
+                
+                # Restaurar el título original
+                self.title("Skill Spammer Engine v1.1 - Presets")
+            
+            if hasattr(user32, "SetWindowDisplayAffinity"):
+                res = SetWindowDisplayAffinity(hwnd_root, affinity)
+                if res:
+                    if affinity == 0x00000011:
+                        self._log_msg("🔒 Modo Streamer: INVISIBLE (Ideal para OBS Window Capture)", "ok")
+                    elif affinity == 0x00000001:
+                        self._log_msg("🔒 Modo Streamer: CAJA NEGRA (Seguro para Discord Pantalla Completa)", "ok")
+                    else:
+                        self._log_msg("🔓 Modo Streamer DESACTIVADO (Visible)", "info")
+                else:
+                    err = ctypes.get_last_error()
+                    self._log_msg(f"❌ Fallo al aplicar Modo Streamer (Error: {err})", "fail")
+            else:
+                self._log_msg("❌ Tu Windows no soporta ocultar de captura.", "fail")
+            self._save_config()
+        except Exception as e:
+            self._log_msg(f"❌ Error al configurar Modo Streamer: {e}", "fail")
 
     def _load_presets(self):
         import json
@@ -509,6 +567,20 @@ class SkillSpammerApp(tk.Tk):
         fm = tk.Frame(f3, bg=PANEL); fm.grid(row=0,column=3,padx=4)
         for t,v in [("Mantener","hold"),("Toggle","toggle")]:
             ttk.Radiobutton(fm, text=t, variable=self._mode_var, value=v, command=self._save_config).pack(side="left",padx=4)
+
+        # Modo Streamer
+        f_streamer = tk.Frame(f3, bg=PANEL)
+        f_streamer.grid(row=1, column=0, columnspan=4, sticky="w", padx=8, pady=4)
+        
+        ttk.Checkbutton(f_streamer, text="🎥 Modo Streamer", 
+                        variable=self._streamer_mode_var,
+                        command=self._toggle_streamer_mode).pack(side="left")
+
+        self._cb_streamer_type = ttk.Combobox(f_streamer, textvariable=self._streamer_type_var,
+                                              values=["Invisible (OBS)", "Caja Negra (Discord/Full)"],
+                                              state="readonly", width=22)
+        self._cb_streamer_type.pack(side="left", padx=10)
+        self._cb_streamer_type.bind("<<ComboboxSelected>>", lambda e: self._toggle_streamer_mode())
 
         # ── Estado ────────────────────────────────────────────────────────────
         self._status_var = tk.StringVar(value="⬛  Inactivo")
